@@ -1,7 +1,19 @@
-#include <RTCZero.h> 
-RTCZero rtc; // Onboard real-time clock
+#include <RTCZero.h>
+#include <WiFiNINA.h>
+#include "secrets.h"
+
+static int fanRelayEnablePin = 3; // D3
+
+#pragma region "WiFi"
+
+int status = WL_IDLE_STATUS;
+WiFiSSLClient client;
+
+#pragma endregion
 
 #pragma region "RTC"
+
+RTCZero rtc; // Onboard real-time clock
 
 // To update the time, manually paste in current epoch from https://www.epochconverter.com/
 // then call this method from setup(). After the time has been set, remove this, and re-compile the sketch.
@@ -101,12 +113,26 @@ void setFanSpeed(int percentage)
   int pwmValue = percentage * MAX_FANDUTY / 100;
   Serial.println("Setting fan speed to " + String(percentage) + "%. PWM value: " + String(pwmValue));
   setFanDutyCycle(pwmValue);
+
+  // If we're turning the fan off completely, turn off the relay.
+  // If we're turning it on, make sure the relay is on.
+  if (percentage <= 0) {
+    digitalWrite(fanRelayEnablePin, LOW);
+  } else {
+    digitalWrite(fanRelayEnablePin, HIGH);
+  }
 }
 
 #pragma endregion
 
 void setup() {
   Serial.begin(9600);
+
+  // TODO: REMOVE BEFORE DEPLOYING
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+
   Serial.println("[Setup] Started.");
 
   // If you need to set the clock again, call this method after
@@ -114,14 +140,61 @@ void setup() {
   //
   // setupClock();
 
+  // Setup the RTC clock
   rtc.begin();
+
+  // Set the PWM frequency needed for the enclosure fan
   setupPWM();
-  setFanSpeed(0);        
+
+  // Setup the relay we're using to turn the fan completely off.
+  // We need a relay because it's 12V input. Setting the PWM to zero
+  // does NOT turn off the fan completely.
+  pinMode(fanRelayEnablePin, OUTPUT);
+
+  // Initially, set the fan speed to zero.
+  setFanSpeed(0);
+
   triggerAlarmAfterDelay(1);
+
+  if (WiFi.status() == WL_NO_MODULE) {
+    Serial.println("Communication with WiFi module failed!");
+    // don't continue
+    while (true);
+  }
+
+  String fv = WiFi.firmwareVersion();
+  if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
+    Serial.println("Please upgrade the firmware");
+  }
+  connectToAP();    // Connect to Wifi Access Point
+  printWifiStatus();
 }
 
 void loop() {
 
+}
+
+void printWifiStatus() {
+  Serial.print("SSID: ");
+  Serial.println(WiFi.SSID());
+
+  IPAddress ip = WiFi.localIP(); // Device IP address
+  Serial.print("IP Address: ");
+  Serial.println(ip);
+}
+
+void connectToAP() {
+  // Try to connect to Wifi network
+  while ( status != WL_CONNECTED) {
+    Serial.print("Attempting to connect to SSID: ");
+    Serial.println(SSIDNAME);
+    // Connect to WPA/WPA2 network
+    status = WiFi.begin(SSIDNAME, SSIDPASSWORD);
+
+    // wait 1 second for connection:
+    delay(1000);
+    Serial.println("Connected...");
+  }
 }
 
 void printDateAndTime() {
