@@ -1,13 +1,28 @@
 #include <RTCZero.h> 
 RTCZero rtc; // Onboard real-time clock
 
+#pragma region "RTC"
+
 // To update the time, manually paste in current epoch from https://www.epochconverter.com/
 // then call this method from setup(). After the time has been set, remove this, and re-compile the sketch.
-void setupClockOnce() {
+void setupClock() {
   rtc.begin();
-  rtc.setEpoch(1597275532);
+  rtc.setEpoch(1597447527);
   Serial.println("RTC set.");
 }
+
+void triggerAlarmAfterDelay(int minuteDelay) {
+  Serial.println("Setting alarm with " + String(minuteDelay) + "delay...");
+  rtc.setAlarmEpoch(rtc.getEpoch() + (minuteDelay * 60));
+  rtc.enableAlarm(rtc.MATCH_MMSS);
+  rtc.attachInterrupt(rtcAlarmTriggered);
+}
+
+void rtcAlarmTriggered() {
+  Serial.println("Alarm triggered!!!");
+}
+
+#pragma endregion
 
 #pragma region "Fan Control"
 
@@ -94,11 +109,44 @@ void setup() {
   Serial.begin(9600);
   Serial.println("[Setup] Started.");
 
+  // If you need to set the clock again, call this method after
+  // following the instructions above to set the time.
+  //
+  // setupClock();
+
+  rtc.begin();
   setupPWM();
-  setFanSpeed(0);                    
+  setFanSpeed(0);        
+  triggerAlarmAfterDelay(1);
 }
 
 void loop() {
-  Serial.println("Testing platformio...");
-  delay(1000);
+
 }
+
+void printDateAndTime() {
+  // Print date
+  print2digits(rtc.getDay());
+  Serial.print("/");
+  print2digits(rtc.getMonth());
+  Serial.print("/");
+  print2digits(rtc.getYear());
+  Serial.print(" ");
+
+  // and time
+  print2digits(rtc.getHours());
+  Serial.print(":");
+  print2digits(rtc.getMinutes());
+  Serial.print(":");
+  print2digits(rtc.getSeconds());
+
+  Serial.println();
+}
+
+void print2digits(int number) {
+  if (number < 10) {
+    Serial.print("0"); // print a 0 before if the number is < than 10
+  }
+  Serial.print(number);
+}
+
