@@ -1,8 +1,24 @@
 #include <RTCZero.h>
 #include <WiFiNINA.h>
+#include <Scheduler.h>
 #include "secrets.h"
 
+// Constants
+static int printerCheckDelay = 2; // minutes
+static int cooloffDelay = 5; // minutes
+static int printerCheckInterval = 2;  // minutes
+
+// Pin definitions
+// Fan PWM pin is 2
 static int fanRelayEnablePin = 3; // D3
+static int builtInLEDPin = 13;
+
+// State variables
+volatile bool printing = false;
+String printerResponseBuffer = String();
+uint32_t lastPrinterCheck = 0;
+int fanSpeed = 30; // Speed will increase or decrease based on VOC, temperature
+int coolOffFanSpeed = 100;
 
 #pragma region "WiFi"
 
@@ -24,7 +40,7 @@ void setupClock() {
 }
 
 void triggerAlarmAfterDelay(int minuteDelay) {
-  Serial.println("[RTC] Setting alarm with " + String(minuteDelay) + "delay...");
+  Serial.println("[RTC] Setting alarm with " + String(minuteDelay) + " delay...");
   rtc.setAlarmEpoch(rtc.getEpoch() + (minuteDelay * 60));
   rtc.enableAlarm(rtc.MATCH_MMSS);
   rtc.attachInterrupt(rtcAlarmTriggered);
@@ -32,6 +48,15 @@ void triggerAlarmAfterDelay(int minuteDelay) {
 
 void rtcAlarmTriggered() {
   Serial.println("[Alarm] Alarm triggered.");
+
+  // Make sure we didn't start printing again
+  // between noticing the printer stopping
+  // and stopping the cooloff period
+  if (printing == false) {
+    stopActivity();
+  } else {
+    Serial.println("[Alarm] Cooloff period ended but printer was printing.");
+  }
 }
 
 #pragma endregion
@@ -127,12 +152,6 @@ void setFanSpeed(int percentage)
 
 void setup() {
   Serial.begin(9600);
-
-  // TODO: REMOVE BEFORE DEPLOYING
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
-
   Serial.println("[Setup] Started.");
 
   // If you need to set the clock again, call this method after
@@ -151,37 +170,26 @@ void setup() {
   // does NOT turn off the fan completely.
   pinMode(fanRelayEnablePin, OUTPUT);
 
+  // Built-in LED
+  pinMode(builtInLEDPin, OUTPUT);
+
   // Initially, set the fan speed to zero.
   setFanSpeed(0);
 
-  triggerAlarmAfterDelay(1);
-
-  if (WiFi.status() == WL_NO_MODULE) {
-    Serial.println("Communication with WiFi module failed!");
-    // don't continue
-    while (true);
-  }
-
-  String fv = WiFi.firmwareVersion();
-  if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
-    Serial.println("Please upgrade the firmware");
-  }
-  connectToAP();    // Connect to Wifi Access Point
+  connectToWiFi();    // Connect to Wifi Access Point
   printWifiStatus();
 
-  // Get the status initially
-  getPrinterStatus();
+  Scheduler.startLoop(listenForPrinterResponse);
 
-  // End setup
+  checkPrinterStatus();
+
 }
 
 void loop() {
-  while (client.available()) {
-    char c = client.read();
-    Serial.write(c);
+  uint32_t currentTime = rtc.getEpoch();
+  if (lastPrinterCheck != 0 && currentTime - lastPrinterCheck > (printerCheckInterval*60)) {
+    checkPrinterStatus();
   }
-
-  delay(1000);
 }
 
 void printWifiStatus() {
@@ -196,18 +204,36 @@ void printWifiStatus() {
   Serial.println(WiFi.firmwareVersion());
 }
 
-void connectToAP() {
-  // Try to connect to Wifi network
-  while ( status != WL_CONNECTED) {
-    Serial.print("[WiFi] Attempting to connect to SSID: ");
-    Serial.println(SSIDNAME);
-    // Connect to WPA/WPA2 network
-    status = WiFi.begin(SSIDNAME, SSIDPASSWORD);
-
-    // wait 1 second for connection:
-    delay(1000);
-    Serial.println("[WiFi] Connected.");
+void connectToWiFi() {
+  if (WiFi.status() == WL_NO_MODULE) {
+    Serial.println("[WiFi] Communication with WiFi module failed!");
+    failIndefinitely();
   }
+
+  String fv = WiFi.firmwareVersion();
+  if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
+    Serial.println("[WiFi] Firmware may require updating");
+  }
+
+  // Try to connect to Wifi network
+  int attempts = 0;
+  int delayT = 300;
+  static int maxAttempts = 10;
+  while (status != WL_CONNECTED && attempts <= maxAttempts) {
+    Serial.print("[WiFi] Connecting... (attempt " + String(attempts+1) + ")");
+
+    status = WiFi.begin(SSIDNAME, SSIDPASSWORD);
+    delay(delayT + (delayT * attempts));
+    attempts++;
+  }
+
+  if (status == WL_CONNECTED) {
+    Serial.println("[WiFi] Connected.");
+  } else {
+
+  }
+
+  
 }
 
 void printDateAndTime() {
@@ -236,20 +262,81 @@ void print2digits(int number) {
   Serial.print(number);
 }
 
-void getPrinterStatus() {
+void checkPrinterStatus() {
   Serial.println("[Printer] Getting printer status...");
   IPAddress server(192,168,7,198);
+  
+  lastPrinterCheck = rtc.getEpoch();
 
   if (client.connect(server, 80)) {
     client.println("GET /api/v1/printer/status HTTP/1.1");
+    client.println("Host: 192.168.7.148");
+    client.println("User-Agent: curl/7.64.1");
     client.println("Accept: application/json");
     client.println("Connection: close");
     client.println();
   } else {
     Serial.println("[Printer] Printer request failed.");
   }
-
+  delay(printerCheckDelay * 60);
+  yield();
 }
 
+void listenForPrinterResponse() {
+  while (client.available()) {
+    char c = client.read();
+    // Serial.write(c); // Uncomment to debug printer API response
+    printerResponseBuffer += c;
+  }
 
+  // Possible states:
+  // ['booting', 'idle', 'printing', 'error', 'maintenance']
+  if (printerResponseBuffer.indexOf("idle") >= 0) {
+    Serial.println("[Printer] Printer is idle.");
+    printerResponseBuffer = String();
 
+    if (printing == true) {
+      printing = false;
+      didStopPrinting();
+    }
+
+  } else if (printerResponseBuffer.indexOf("printing") >= 0) {
+    Serial.println("[Printer] Printer is printing.");
+    printerResponseBuffer = String();
+
+    if (printing == false) {
+      printing = true;
+      didStartPrinting();
+    }
+  }
+
+  yield();
+}
+
+void didStartPrinting() {
+  setFanSpeed(fanSpeed);
+}
+
+void didStopPrinting() {
+  // Enter the cool-off period that cools the print
+  // and filters out VOC's
+  Serial.println("[Printer] Printing stopped. Speeding up fan to remove VOC's from chamber.");
+  setFanSpeed(coolOffFanSpeed);
+
+  triggerAlarmAfterDelay(cooloffDelay);
+}
+
+// Stop the fan, data collection, and anything else
+void stopActivity() {
+  Serial.println("[Printer] Cooloff period ended. Stopping fan.");
+  setFanSpeed(0);
+}
+
+void failIndefinitely() {
+  while (true) {
+    digitalWrite(builtInLEDPin, HIGH);
+    delay(500);
+    digitalWrite(builtInLEDPin, LOW);
+    delay(500);
+  }
+}
