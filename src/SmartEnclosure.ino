@@ -7,7 +7,7 @@ static int fanRelayEnablePin = 3; // D3
 #pragma region "WiFi"
 
 int status = WL_IDLE_STATUS;
-WiFiSSLClient client;
+WiFiClient client;
 
 #pragma endregion
 
@@ -24,14 +24,14 @@ void setupClock() {
 }
 
 void triggerAlarmAfterDelay(int minuteDelay) {
-  Serial.println("Setting alarm with " + String(minuteDelay) + "delay...");
+  Serial.println("[RTC] Setting alarm with " + String(minuteDelay) + "delay...");
   rtc.setAlarmEpoch(rtc.getEpoch() + (minuteDelay * 60));
   rtc.enableAlarm(rtc.MATCH_MMSS);
   rtc.attachInterrupt(rtcAlarmTriggered);
 }
 
 void rtcAlarmTriggered() {
-  Serial.println("Alarm triggered!!!");
+  Serial.println("[Alarm] Alarm triggered.");
 }
 
 #pragma endregion
@@ -111,7 +111,7 @@ void setFanDutyCycle(int pcCycle)
 void setFanSpeed(int percentage)
 {
   int pwmValue = percentage * MAX_FANDUTY / 100;
-  Serial.println("Setting fan speed to " + String(percentage) + "%. PWM value: " + String(pwmValue));
+  Serial.println("[Fan] Setting fan speed to " + String(percentage) + "%. PWM value: " + String(pwmValue));
   setFanDutyCycle(pwmValue);
 
   // If we're turning the fan off completely, turn off the relay.
@@ -168,32 +168,45 @@ void setup() {
   }
   connectToAP();    // Connect to Wifi Access Point
   printWifiStatus();
+
+  // Get the status initially
+  getPrinterStatus();
+
+  // End setup
 }
 
 void loop() {
+  while (client.available()) {
+    char c = client.read();
+    Serial.write(c);
+  }
 
+  delay(1000);
 }
 
 void printWifiStatus() {
-  Serial.print("SSID: ");
+  Serial.print("[WiFi] SSID: ");
   Serial.println(WiFi.SSID());
 
-  IPAddress ip = WiFi.localIP(); // Device IP address
-  Serial.print("IP Address: ");
+  IPAddress ip = WiFi.localIP();
+  Serial.print("[WiFi] IP Address: ");
   Serial.println(ip);
+
+  Serial.print("[WiFi] Firmware version: ");
+  Serial.println(WiFi.firmwareVersion());
 }
 
 void connectToAP() {
   // Try to connect to Wifi network
   while ( status != WL_CONNECTED) {
-    Serial.print("Attempting to connect to SSID: ");
+    Serial.print("[WiFi] Attempting to connect to SSID: ");
     Serial.println(SSIDNAME);
     // Connect to WPA/WPA2 network
     status = WiFi.begin(SSIDNAME, SSIDPASSWORD);
 
     // wait 1 second for connection:
     delay(1000);
-    Serial.println("Connected...");
+    Serial.println("[WiFi] Connected.");
   }
 }
 
@@ -222,4 +235,21 @@ void print2digits(int number) {
   }
   Serial.print(number);
 }
+
+void getPrinterStatus() {
+  Serial.println("[Printer] Getting printer status...");
+  IPAddress server(192,168,7,198);
+
+  if (client.connect(server, 80)) {
+    client.println("GET /api/v1/printer/status HTTP/1.1");
+    client.println("Accept: application/json");
+    client.println("Connection: close");
+    client.println();
+  } else {
+    Serial.println("[Printer] Printer request failed.");
+  }
+
+}
+
+
 
