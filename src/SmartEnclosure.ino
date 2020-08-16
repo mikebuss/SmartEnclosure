@@ -218,23 +218,19 @@ void connectToWiFi() {
   // Try to connect to Wifi network
   int attempts = 0;
   int delayT = 300;
-  static int maxAttempts = 10;
-  while (status != WL_CONNECTED && attempts <= maxAttempts) {
+  static int maxDelayTime = 10 * 60; // seconds
+  while (status != WL_CONNECTED) {
     Serial.print("[WiFi] Connecting... (attempt " + String(attempts+1) + ")");
 
     status = WiFi.begin(SSIDNAME, SSIDPASSWORD);
-    delay(delayT + (delayT * attempts));
+
+    int delayTime = (delayT + (delayT * attempts));
+    delay(min(delayTime, maxDelayTime));
     attempts++;
   }
 
-  if (status == WL_CONNECTED) {
-    Serial.println("[WiFi] Connected.");
-  } else {
-    Serial.println("[WiFi] Failed to connect to WiFi.");
-    failIndefinitely();
-  }
+  Serial.println("[WiFi] Connected.");
 
-  
 }
 
 void printDateAndTime() {
