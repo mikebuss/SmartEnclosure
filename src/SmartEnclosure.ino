@@ -4,13 +4,11 @@
 #include "secrets.h"
 
 // Constants
-static int printerCheckDelay = 2; // minutes
-static int cooloffDelay = 5; // minutes
-static uint32_t printerCheckInterval = 2;  // minutes
+static int cooloffDelay = 5; // minutes. How long to keep the fan at 100% after a print has finished.
+uint32_t printerCheckInterval = 2;  // minutes
 
 String printingStates[3] = {"printing", "resuming", "pre_print"};
 String nonPrintingStates[6] = {"none", "pausing", "paused", "post_print", "wait_cleanup", "wait_user_action"};
-static uint32_t minimumCharactersInResponse = 4;
 
 // Pin definitions
 // Fan PWM pin is 2
@@ -19,9 +17,11 @@ static int builtInLEDPin = 13;
 
 // State variables
 volatile bool printing = false;
+volatile bool inCoolOffPeriod = false;
+
 String printerResponseBuffer = String();
 uint32_t lastPrinterCheck = 0;
-int fanSpeed = 30; // Speed will increase or decrease based on VOC, temperature
+int defaultFanSpeed = 50; // Percentage. Speed will increase or decrease based on VOC, temperature
 int coolOffFanSpeed = 100;
 
 int status = WL_IDLE_STATUS;
@@ -46,6 +46,7 @@ void triggerAlarmAfterDelay(int minuteDelay) {
 
 void rtcAlarmTriggered() {
   Serial.println("[Alarm] Alarm triggered.");
+  inCoolOffPeriod = false;
 
   // Make sure we didn't start printing again
   // between noticing the printer stopping
@@ -267,8 +268,6 @@ void checkPrinterStatus() {
   } else {
     Serial.println("[Printer] Printer request failed.");
   }
-  delay(printerCheckDelay * 60);
-  yield();
 }
 
 void listenForPrinterResponse() {
@@ -279,19 +278,23 @@ void listenForPrinterResponse() {
   }
 
   if (stringIsFoundInArray(printerResponseBuffer, printingStates, 3)) {
+    Serial.println();
     Serial.println("[Printer] Printer is printing.");
     printerResponseBuffer = String();
 
     if (printing == false) {
       printing = true;
+      inCoolOffPeriod = false;
       didStartPrinting();
     }
   } else if (stringIsFoundInArray(printerResponseBuffer, nonPrintingStates, 6)) {
+    Serial.println();
     Serial.println("[Printer] Printer is idle.");
     printerResponseBuffer = String();
 
     if (printing == true) {
       printing = false;
+      inCoolOffPeriod = true;
       didStopPrinting();
     }
   }
@@ -309,7 +312,7 @@ bool stringIsFoundInArray(String string, String strArray[6], int count) {
 }
 
 void didStartPrinting() {
-  setFanSpeed(fanSpeed);
+  setFanSpeed(calculatedFanSpeed());
 }
 
 void didStopPrinting() {
@@ -325,6 +328,11 @@ void didStopPrinting() {
 void stopActivity() {
   Serial.println("[Printer] Cooloff period ended. Stopping fan.");
   setFanSpeed(0);
+}
+
+int calculatedFanSpeed() {
+  // TODO: Calculate fan speed based on environment temperature, VOC level, etc
+  return defaultFanSpeed;
 }
 
 void failIndefinitely() {
