@@ -6,7 +6,7 @@
 // Constants
 static int printerCheckDelay = 2; // minutes
 static int cooloffDelay = 5; // minutes
-static int printerCheckInterval = 2;  // minutes
+static uint32_t printerCheckInterval = 2;  // minutes
 
 // Pin definitions
 // Fan PWM pin is 2
@@ -20,14 +20,8 @@ uint32_t lastPrinterCheck = 0;
 int fanSpeed = 30; // Speed will increase or decrease based on VOC, temperature
 int coolOffFanSpeed = 100;
 
-#pragma region "WiFi"
-
 int status = WL_IDLE_STATUS;
 WiFiClient client;
-
-#pragma endregion
-
-#pragma region "RTC"
 
 RTCZero rtc; // Onboard real-time clock
 
@@ -58,10 +52,6 @@ void rtcAlarmTriggered() {
     Serial.println("[Alarm] Cooloff period ended but printer was printing.");
   }
 }
-
-#pragma endregion
-
-#pragma region "Fan Control"
 
 // 100% at 25 kHz
 const int MAX_FANDUTY = 5000;
@@ -147,8 +137,6 @@ void setFanSpeed(int percentage)
     digitalWrite(fanRelayEnablePin, HIGH);
   }
 }
-
-#pragma endregion
 
 void setup() {
   Serial.begin(9600);
