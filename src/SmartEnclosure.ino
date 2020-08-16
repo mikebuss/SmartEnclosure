@@ -4,7 +4,7 @@
 #include "secrets.h"
 
 // Constants
-static int cooloffDelay = 5; // minutes. How long to keep the fan at 100% after a print has finished.
+static int cooloffTime = 10; // minutes. How long to keep the fan at 100% after a print has finished.
 uint32_t printerCheckInterval = 2;  // minutes
 
 String printingStates[3] = {"printing", "resuming", "pre_print"};
@@ -321,7 +321,7 @@ void didStopPrinting() {
   Serial.println("[Printer] Printing stopped. Speeding up fan to remove VOC's from chamber.");
   setFanSpeed(coolOffFanSpeed);
 
-  triggerAlarmAfterDelay(cooloffDelay);
+  triggerAlarmAfterDelay(cooloffTime);
 }
 
 // Stop the fan, data collection, and anything else
