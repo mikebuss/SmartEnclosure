@@ -8,6 +8,10 @@ static int printerCheckDelay = 2; // minutes
 static int cooloffDelay = 5; // minutes
 static uint32_t printerCheckInterval = 2;  // minutes
 
+String printingStates[3] = {"printing", "resuming", "pre_print"};
+String nonPrintingStates[6] = {"none", "pausing", "paused", "post_print", "wait_cleanup", "wait_user_action"};
+static uint32_t minimumCharactersInResponse = 4;
+
 // Pin definitions
 // Fan PWM pin is 2
 static int fanRelayEnablePin = 3; // D3
@@ -254,7 +258,7 @@ void checkPrinterStatus() {
   lastPrinterCheck = rtc.getEpoch();
 
   if (client.connect(server, 80)) {
-    client.println("GET /api/v1/printer/status HTTP/1.1");
+    client.println("GET /api/v1/print_job/state HTTP/1.1");
     client.println("Host: 192.168.7.148");
     client.println("User-Agent: curl/7.64.1");
     client.println("Accept: application/json");
@@ -270,22 +274,11 @@ void checkPrinterStatus() {
 void listenForPrinterResponse() {
   while (client.available()) {
     char c = client.read();
-    // Serial.write(c); // Uncomment to debug printer API response
+    Serial.write(c); // Uncomment to debug printer API response
     printerResponseBuffer += c;
   }
 
-  // Possible states:
-  // ['booting', 'idle', 'printing', 'error', 'maintenance']
-  if (printerResponseBuffer.indexOf("idle") >= 0) {
-    Serial.println("[Printer] Printer is idle.");
-    printerResponseBuffer = String();
-
-    if (printing == true) {
-      printing = false;
-      didStopPrinting();
-    }
-
-  } else if (printerResponseBuffer.indexOf("printing") >= 0) {
+  if (stringIsFoundInArray(printerResponseBuffer, printingStates, 3)) {
     Serial.println("[Printer] Printer is printing.");
     printerResponseBuffer = String();
 
@@ -293,9 +286,26 @@ void listenForPrinterResponse() {
       printing = true;
       didStartPrinting();
     }
+  } else if (stringIsFoundInArray(printerResponseBuffer, nonPrintingStates, 6)) {
+    Serial.println("[Printer] Printer is idle.");
+    printerResponseBuffer = String();
+
+    if (printing == true) {
+      printing = false;
+      didStopPrinting();
+    }
   }
 
   yield();
+}
+
+bool stringIsFoundInArray(String string, String strArray[6], int count) {
+  for (int i = 0; i < count; i++) {
+    if (string.indexOf(strArray[i]) != -1) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void didStartPrinting() {
