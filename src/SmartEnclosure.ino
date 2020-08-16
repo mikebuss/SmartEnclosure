@@ -18,11 +18,10 @@ static int builtInLEDPin = 13;
 // State variables
 volatile bool printing = false;
 volatile bool inCoolOffPeriod = false;
-
 String printerResponseBuffer = String();
-uint32_t lastPrinterCheck = 0;
-int defaultFanSpeed = 50; // Percentage. Speed will increase or decrease based on VOC, temperature
-int coolOffFanSpeed = 100;
+uint32_t lastPrinterCheck; // epoch
+int defaultFanSpeed = 50; // percentage. Speed will increase or decrease based on VOC, temperature
+int coolOffFanSpeed = 100; // percentage
 
 int status = WL_IDLE_STATUS;
 WiFiClient client;
@@ -336,6 +335,8 @@ int calculatedFanSpeed() {
 }
 
 void failIndefinitely() {
+  // Something went catastrophically wrong.
+  // Blink the LED and stop running the code.
   while (true) {
     digitalWrite(builtInLEDPin, HIGH);
     delay(500);
