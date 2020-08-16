@@ -171,8 +171,6 @@ void setup() {
   connectToWiFi();    // Connect to Wifi Access Point
   printWifiStatus();
 
-  Scheduler.startLoop(listenForPrinterResponse);
-
   checkPrinterStatus();
 
 }
@@ -182,6 +180,8 @@ void loop() {
   if (lastPrinterCheck != 0 && currentTime - lastPrinterCheck > (printerCheckInterval*60)) {
     checkPrinterStatus();
   }
+
+  listenForPrinterResponse();
 }
 
 void printWifiStatus() {
@@ -258,12 +258,16 @@ void checkPrinterStatus() {
   lastPrinterCheck = rtc.getEpoch();
 
   if (client.connect(server, 80)) {
+    Serial.println("[Printer] Connected to server. Sending request...");
+
     client.println("GET /api/v1/print_job/state HTTP/1.1");
     client.println("Host: 192.168.7.148");
     client.println("User-Agent: curl/7.64.1");
     client.println("Accept: application/json");
     client.println("Connection: close");
     client.println();
+
+    Serial.println("[Printer] Finished sending request.");
   } else {
     Serial.println("[Printer] Printer request failed.");
   }
@@ -297,8 +301,6 @@ void listenForPrinterResponse() {
       didStopPrinting();
     }
   }
-
-  yield();
 }
 
 bool stringIsFoundInArray(String string, String strArray[6], int count) {
