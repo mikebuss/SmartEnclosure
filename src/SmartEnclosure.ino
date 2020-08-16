@@ -230,7 +230,8 @@ void connectToWiFi() {
   if (status == WL_CONNECTED) {
     Serial.println("[WiFi] Connected.");
   } else {
-
+    Serial.println("[WiFi] Failed to connect to WiFi.");
+    failIndefinitely();
   }
 
   
