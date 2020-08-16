@@ -280,6 +280,11 @@ void listenForPrinterResponse() {
     printerResponseBuffer += c;
   }
 
+  if (printerResponseBuffer.indexOf("\"") == -1) {
+    // Ignore the response until we get at least one double quote
+    return;
+  }
+
   if (stringIsFoundInArray(printerResponseBuffer, printingStates, 3)) {
     Serial.println();
     Serial.println("[Printer] Printer is printing.");
