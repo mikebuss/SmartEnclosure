@@ -12,7 +12,7 @@ String nonPrintingStates[6] = {"none", "pausing", "paused", "post_print", "wait_
 
 // Pin definitions
 // Fan PWM pin is 2
-static int fanRelayEnablePin = 3; // D3
+static int fanRelayEnablePin = 4; // D4
 static int builtInLEDPin = 13;
 
 // State variables
