@@ -20,6 +20,11 @@ static int alarmPin = 6;
 
 // State variables
 volatile bool flameWasDetected = false;
+volatile int flameDetectionCounter = 0; // Increment to avoid false positives for flame counter
+static int maxFlameDetectionCounter = 10; // If we detect this many flames in a minute, we probably have a flame
+volatile uint32_t lastFlameDetected = 0;
+volatile bool didTriggerEmergencyShutoff = false;
+
 volatile bool printing = false;
 volatile bool inCoolOffPeriod = false;
 String printerResponseBuffer = String();
@@ -150,9 +155,9 @@ void setup() {
   Serial.begin(9600);
 
   // TODO: Remove before finishing debugging
-  while (!Serial) {
-    ;
-  }
+  // while (!Serial) {
+  //   ;
+  // }
 
   Serial.println("[Setup] Started.");
 
@@ -194,16 +199,18 @@ void setup() {
   printWifiStatus();
 
   checkPrinterStatus();
-
 }
 
 void loop() {
   // If we detected a fire, keep sounding the alarm
+  // TODO: Change to alarmPin and slow down significantly
   while (flameWasDetected) {
-    digitalWrite(alarmPin, HIGH);
-    delay(1500);
-    digitalWrite(alarmPin, LOW);
-    delay(3000);
+    emergencyShutdown();
+
+    digitalWrite(builtInLEDPin, HIGH);
+    delay(250);
+    digitalWrite(builtInLEDPin, LOW);
+    delay(250);
   }
 
   uint32_t currentTime = rtc.getEpoch();
@@ -374,11 +381,39 @@ int calculatedFanSpeed() {
 }
 
 void flameDetected() {
-  flameWasDetected = true;
-  emergencyShutdown();
+  if (didTriggerEmergencyShutoff) {
+    // We already shutoff - we can ignore these signals
+    Serial.println("[Flame] Flame detected but we already shut down.");
+    return;
+  }
+
+  uint32_t currEpoch = rtc.getEpoch();
+  if (currEpoch - lastFlameDetected > 1000) {
+    // If we haven't detected a flame for over a minute, we've probably just been getting
+    // noise in the signal. Reset everything.
+    flameDetectionCounter = 0;
+  }
+
+  lastFlameDetected = currEpoch;
+  flameDetectionCounter++;
+
+  Serial.print("[Flame] Potential flame detected. Incremented to: ");
+  Serial.println(flameDetectionCounter);
+  
+  if (flameDetectionCounter > maxFlameDetectionCounter) {
+    flameWasDetected = true;
+    emergencyShutdown();
+  }
 }
 
 void emergencyShutdown() {
+  if (didTriggerEmergencyShutoff) {
+    return;
+  }
+  didTriggerEmergencyShutoff = true;
+
+  Serial.println("[Flame] Emergency shutoff!");
+
   // We may have just detected a fire. 
   // Stop everything immediately and shut off the power.
   turnOff3DPrinterPower();
