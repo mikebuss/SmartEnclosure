@@ -16,6 +16,7 @@ static int fanRelayEnablePin = 4;
 static int builtInLEDPin = 13;
 static int flameSensorPin = 9;
 static int emergencyPowerShutoffPin = 10;
+static int alarmPin = 6;
 
 // State variables
 volatile bool flameWasDetected = false;
@@ -182,6 +183,10 @@ void setup() {
   pinMode(emergencyPowerShutoffPin, OUTPUT);
   digitalWrite(emergencyPowerShutoffPin, LOW);
 
+  // Alarm for fire detection
+  pinMode(alarmPin, OUTPUT);
+  digitalWrite(alarmPin, LOW);
+
   // Initially, set the fan speed to zero.
   setFanSpeed(0);
 
@@ -193,8 +198,12 @@ void setup() {
 }
 
 void loop() {
-  if (flameWasDetected) {
-    return;
+  // If we detected a fire, keep sounding the alarm
+  while (flameWasDetected) {
+    digitalWrite(alarmPin, HIGH);
+    delay(1500);
+    digitalWrite(alarmPin, LOW);
+    delay(3000);
   }
 
   uint32_t currentTime = rtc.getEpoch();
@@ -374,6 +383,9 @@ void emergencyShutdown() {
   // Stop everything immediately and shut off the power.
   turnOff3DPrinterPower();
   stopActivity();
+
+  // Sound the alarm
+  digitalWrite(alarmPin, HIGH);
 }
 
 void turnOff3DPrinterPower() {
