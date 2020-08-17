@@ -12,10 +12,13 @@ String nonPrintingStates[6] = {"none", "pausing", "paused", "post_print", "wait_
 
 // Pin definitions
 // Fan PWM pin is 2
-static int fanRelayEnablePin = 4; // D4
+static int fanRelayEnablePin = 4;
 static int builtInLEDPin = 13;
+static int flameSensorPin = 9;
+static int emergencyPowerShutoffPin = 10;
 
 // State variables
+volatile bool flameWasDetected = false;
 volatile bool printing = false;
 volatile bool inCoolOffPeriod = false;
 String printerResponseBuffer = String();
@@ -29,7 +32,7 @@ WiFiClient client;
 RTCZero rtc; // Onboard real-time clock
 
 // To update the time, manually paste in current epoch from https://www.epochconverter.com/
-// then call this method from setup(). After the time has been set, remove this, and re-compile the sketch.
+// then call this method from `setup`. After the time has been set, remove this, and re-compile the sketch.
 void setupClock() {
   rtc.begin();
   rtc.setEpoch(1597447527);
@@ -144,6 +147,12 @@ void setFanSpeed(int percentage)
 
 void setup() {
   Serial.begin(9600);
+
+  // TODO: Remove before finishing debugging
+  while (!Serial) {
+    ;
+  }
+
   Serial.println("[Setup] Started.");
 
   // If you need to set the clock again, call this method after
@@ -165,6 +174,14 @@ void setup() {
   // Built-in LED
   pinMode(builtInLEDPin, OUTPUT);
 
+  // Flame sensor
+  pinMode(flameSensorPin, INPUT);
+  attachInterrupt(digitalPinToInterrupt(flameSensorPin), flameDetected, RISING);
+
+  // Emergency power shutoff
+  pinMode(emergencyPowerShutoffPin, OUTPUT);
+  digitalWrite(emergencyPowerShutoffPin, LOW);
+
   // Initially, set the fan speed to zero.
   setFanSpeed(0);
 
@@ -176,6 +193,10 @@ void setup() {
 }
 
 void loop() {
+  if (flameWasDetected) {
+    return;
+  }
+
   uint32_t currentTime = rtc.getEpoch();
   if (lastPrinterCheck != 0 && currentTime - lastPrinterCheck > (printerCheckInterval*60)) {
     checkPrinterStatus();
@@ -334,11 +355,29 @@ void didStopPrinting() {
 void stopActivity() {
   Serial.println("[Printer] Cooloff period ended. Stopping fan.");
   setFanSpeed(0);
+
+  // TODO: Stop data collection
 }
 
 int calculatedFanSpeed() {
   // TODO: Calculate fan speed based on environment temperature, VOC level, etc
   return defaultFanSpeed;
+}
+
+void flameDetected() {
+  flameWasDetected = true;
+  emergencyShutdown();
+}
+
+void emergencyShutdown() {
+  // We may have just detected a fire. 
+  // Stop everything immediately and shut off the power.
+  turnOff3DPrinterPower();
+  stopActivity();
+}
+
+void turnOff3DPrinterPower() {
+  digitalWrite(emergencyPowerShutoffPin, HIGH);
 }
 
 void failIndefinitely() {
