@@ -3,9 +3,27 @@
 #include <Scheduler.h>
 #include "secrets.h"
 
+#include <Wire.h>
+#include "Adafruit_SGP30.h"
+#include "Adafruit_Si7021.h"
+#include <Adafruit_HMC5883_U.h>
+
+#define TCAADDR 0x70
+
+// Adafruit SGP 30 VOC+eCO2 sensors
+// https://www.adafruit.com/product/3709
+Adafruit_SGP30 vocSensor1;  // tcaselect(1)
+Adafruit_SGP30 vocSensor2;
+
+// Adafruit si7021
+// https://www.adafruit.com/product/3251
+Adafruit_Si7021 tempSensor1 = Adafruit_Si7021(); // tcaselect(0)
+Adafruit_Si7021 tempSensor2 = Adafruit_Si7021(); 
+
 // Constants
 static int cooloffTime = 10; // minutes. How long to keep the fan at 100% after a print has finished.
 uint32_t printerCheckInterval = 2;  // minutes
+uint32_t environmentCheckInterval = 15;  // seconds
 
 String printingStates[3] = {"printing", "resuming", "pre_print"};
 String nonPrintingStates[6] = {"none", "pausing", "paused", "post_print", "wait_cleanup", "wait_user_action"};
@@ -21,7 +39,7 @@ static int alarmPin = 6;
 // State variables
 volatile bool flameWasDetected = false;
 volatile int flameDetectionCounter = 0; // Increment to avoid false positives for flame counter
-static int maxFlameDetectionCounter = 10; // If we detect this many flames in a minute, we probably have a flame
+static int maxFlameDetectionCounter = 20; // If we detect this many flames in a minute, we probably have a flame
 volatile uint32_t lastFlameDetected = 0;
 volatile bool didTriggerEmergencyShutoff = false;
 
@@ -29,13 +47,41 @@ volatile bool printing = false;
 volatile bool inCoolOffPeriod = false;
 String printerResponseBuffer = String();
 uint32_t lastPrinterCheck; // epoch
-int defaultFanSpeed = 50; // percentage. Speed will increase or decrease based on VOC, temperature
+
+uint32_t lastEnvironmentCheck; // epoch
+
+// TODO: Change
+int defaultFanSpeed = 75; // percentage. Speed will increase or decrease based on VOC, temperature
 int coolOffFanSpeed = 100; // percentage
 
 int status = WL_IDLE_STATUS;
 WiFiClient client;
 
 RTCZero rtc; // Onboard real-time clock
+
+//
+/* return absolute humidity [mg/m^3] with approximation formula
+* @param temperature [°C]
+* @param humidity [%RH]
+*/
+uint32_t getAbsoluteHumidity(float temperature, float humidity) {
+    // approximation formula from Sensirion SGP30 Driver Integration chapter 3.15
+    const float absoluteHumidity = 216.7f * ((humidity / 100.0f) * 6.112f * exp((17.62f * temperature) / (243.12f + temperature)) / (273.15f + temperature)); // [g/m^3]
+    const uint32_t absoluteHumidityScaled = static_cast<uint32_t>(1000.0f * absoluteHumidity); // [mg/m^3]
+    return absoluteHumidityScaled;
+}
+
+// Select which i2c device to use with the multiplexer
+// input between 0-7
+void tcaselect(uint8_t i) {
+  if (i > 7) return;
+ 
+  Wire.beginTransmission(TCAADDR);
+  Wire.write(1 << i);
+  Wire.endTransmission();  
+}
+
+//
 
 // To update the time, manually paste in current epoch from https://www.epochconverter.com/
 // then call this method from `setup`. After the time has been set, remove this, and re-compile the sketch.
@@ -155,9 +201,9 @@ void setup() {
   Serial.begin(9600);
 
   // TODO: Remove before finishing debugging
-  // while (!Serial) {
-  //   ;
-  // }
+  while (!Serial) {
+    delay(10);
+  }
 
   Serial.println("[Setup] Started.");
 
@@ -192,13 +238,51 @@ void setup() {
   pinMode(alarmPin, OUTPUT);
   digitalWrite(alarmPin, LOW);
 
-  // Initially, set the fan speed to zero.
+  // To show the system is working, turn the fan on for a few seconds
+  setFanSpeed(10);
+  delay(2000);
   setFanSpeed(0);
 
-  connectToWiFi();    // Connect to Wifi Access Point
+  // Setup environment sensors
+  Serial.println("[Setup] Setting up environment sensors...");
+  setupEnvironmentSensors();
+
+  // Setup WiFi
+  connectToWiFi();
   printWifiStatus();
 
+  // Check printer status on startup
   checkPrinterStatus();
+
+}
+
+void setupEnvironmentSensors() {
+  Wire.begin();
+  
+  Serial.print("[Sensors] Configuring internal VOC (SGP30) sensor");
+  tcaselect(1);
+  delay(100);
+  if (vocSensor1.begin()){
+    Serial.print("[Sensors] Found VOC (SGP30) serial #");
+    Serial.print(vocSensor1.serialnumber[0], HEX);
+    Serial.print(vocSensor1.serialnumber[1], HEX);
+    Serial.println(vocSensor1.serialnumber[2], HEX);
+  } else {
+    Serial.println("[Sensors] VOC (SGP30) sensor not found at channel 1");
+    failIndefinitely();
+  }
+
+  Serial.println("[Sensors] Configuring internal temperature (Si7021) sensor ");
+  tcaselect(0);
+  delay(100);
+  if (tempSensor1.begin()){
+    Serial.print("[Sensors] Found temperature (Si7021) serial #");
+    Serial.println(tempSensor1.sernum_a, HEX); Serial.println(tempSensor1.sernum_b, HEX);
+  } else {
+    Serial.println("[Sensors] Temperature (Si7021) sensor not found at channel 0");
+    failIndefinitely();
+  }
+  
 }
 
 void loop() {
@@ -218,7 +302,56 @@ void loop() {
     checkPrinterStatus();
   }
 
+  if ((currentTime - lastEnvironmentCheck > environmentCheckInterval)) {  // && (printing || inCoolOffPeriod) && 
+    checkEnvironment();
+  }
+
   listenForPrinterResponse();
+}
+
+void checkEnvironment() {
+  lastEnvironmentCheck = rtc.getEpoch();
+  Serial.println("[Sensors] Checking environment...");
+
+  // Internal temperature sensor
+  tcaselect(0);
+  delay(100);
+  float internalTemperature = tempSensor1.readTemperature(); // [°C]
+  float internalHumidity = tempSensor1.readHumidity(); // [%RH]
+  Serial.print("[Sensors Values] Internal temperature: ");
+  Serial.println((internalTemperature * 1.8) + 32, 2);
+  Serial.print("[Sensors Values] Internal humidity: ");
+  Serial.println(internalHumidity);
+
+  // External temperature sensor
+  // Serial.print("[Sensors] Checking external temperature (Si7021) sensor...");
+  // tcaselect(2);
+  // delay(100);
+  // float externalTemperature = tempSensor2.readTemperature(); // [°C]
+  // float externalHumidity = tempSensor2.readHumidity(); // [%RH]
+  // Serial.print("[Sensors Values] External temperature: ");
+  // Serial.println(externalTemperature);
+  // Serial.print("[Sensors Values] External humidity: ");
+  // Serial.println(externalHumidity);
+
+  // Internal VOC sensor
+  tcaselect(1);
+  delay(200);
+
+  vocSensor1.setHumidity(getAbsoluteHumidity(internalTemperature, internalHumidity));
+  if (! vocSensor1.IAQmeasure()) {
+    Serial.println("[Sensor] Internal VOC measurement failed.");
+    return;
+  }
+  Serial.print("[Sensors Values] TVOC "); Serial.print(vocSensor1.TVOC); Serial.println(" ppb\t");
+  Serial.print("[Sensors Values] eCO2 "); Serial.print(vocSensor1.eCO2); Serial.println(" ppm");
+  if (! vocSensor1.IAQmeasureRaw()) {
+    Serial.println("[Sensor] Internal Raw VOC measurement failed");
+    return;
+  }
+  Serial.println("--------------");
+
+
 }
 
 void printWifiStatus() {
