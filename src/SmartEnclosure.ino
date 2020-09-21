@@ -201,9 +201,9 @@ void setup() {
   Serial.begin(9600);
 
   // TODO: Remove before finishing debugging
-  while (!Serial) {
-    delay(10);
-  }
+  // if (!Serial) {
+  //   delay(3000);
+  // }
 
   Serial.println("[Setup] Started.");
 
@@ -240,7 +240,7 @@ void setup() {
 
   // To show the system is working, turn the fan on for a few seconds
   setFanSpeed(10);
-  delay(2000);
+  delay(5000);
   setFanSpeed(0);
 
   // Setup environment sensors
