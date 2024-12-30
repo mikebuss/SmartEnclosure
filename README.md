@@ -13,11 +13,11 @@ An Arduino-based smart air filtration and safety system for 3D printers, featuri
 - HEPA and carbon filtration
 - Built-in safety features including emergency power shutoff
 
-<img src="images/1.jpg" alt="Picture of the enclosure" width="300">
-<img src="images/2.jpg" alt="Picture of the enclosure" width="300">
-<img src="images/3.jpg" alt="Picture of the enclosure" width="300">
-<img src="images/4.jpg" alt="Picture of the enclosure" width="300">
-<img src="images/5.jpg" alt="Picture of the enclosure" width="300">
+<img src="images/1.jpg" alt="Picture of the enclosure" width="600">
+<img src="images/2.png" alt="Picture of the enclosure" width="600">
+<img src="images/3.jpg" alt="Picture of the enclosure" width="600">
+<img src="images/4.jpg" alt="Picture of the enclosure" width="600">
+<img src="images/5.png" alt="Picture of the enclosure" width="600">
 
 ## Hardware Requirements
 
